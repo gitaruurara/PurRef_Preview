@@ -1,3 +1,5 @@
 /test/
 /IMPLEMENTATION_COMPLETE.md
 /WINDOW_HIDING.md
+node_modules/
+*.log

@@ -6,20 +6,10 @@
     "name": "PurRef_Preview",
     "logo": "/logo.png",
     "keywords": [
-        "icns",
         "pur"
     ],
     "devTools": false,
     "preview": {
-        "icns": {
-            "thumbnail": {
-                "path": "thumbnail/icns.js",
-                "size": 400
-            },
-            "viewer": {
-                "path": "viewer/icns.html"
-            }
-        },
         "pur": {
             "thumbnail": {
                 "path": "thumbnail/pureref.js",

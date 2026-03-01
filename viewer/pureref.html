@@ -74,6 +74,49 @@
 			color: #888;
 			font-size: 14px;
 		}
+
+		/* Context menu */
+		#context-menu {
+			display: none;
+			position: fixed;
+			background: #2d2d2d;
+			border: 1px solid #555;
+			border-radius: 4px;
+			padding: 4px 0;
+			z-index: 9999;
+			min-width: 220px;
+			box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+			font-size: 13px;
+			color: #ddd;
+		}
+
+		#context-menu.visible {
+			display: block;
+		}
+
+		.context-menu-item {
+			padding: 7px 16px;
+			cursor: pointer;
+			white-space: nowrap;
+		}
+
+		.context-menu-item:hover {
+			background: #444;
+		}
+
+		.context-menu-item.disabled {
+			color: #666;
+			cursor: default;
+		}
+
+		.context-menu-item.disabled:hover {
+			background: transparent;
+		}
+
+		.context-menu-separator {
+			border-top: 1px solid #444;
+			margin: 4px 0;
+		}
 	</style>
 </head>
 <body>
@@ -92,6 +135,14 @@
 		</div>
 	</div>
 
+	<!-- Context menu -->
+	<div id="context-menu">
+		<div class="context-menu-item" id="ctx-regen-original">オリジナルサイズで再生成</div>
+		<div class="context-menu-item" id="ctx-regen-medium">2000×2000 で再生成</div>
+		<div class="context-menu-separator"></div>
+		<div class="context-menu-item" id="ctx-fit">画面にフィット</div>
+	</div>
+
 	<script>
 		// Load panzoom from relative path
 		const path = require('path');
@@ -104,11 +155,60 @@
 			console.log('[PureRef Viewer] Panzoom loaded successfully');
 		} catch (err) {
 			console.error('[PureRef Viewer] Failed to load panzoom:', err.message);
-			alert('エラー: panzoom ライブラリを読み込めませんでした。\n手動でパン・ズーム機能を有効にします。');
+			alert('Error: Could not load panzoom library.');
 		}
 
 		const urlParams = new URLSearchParams(window.location.search);
 		const filePath = urlParams.get('path');
+		const lang = (urlParams.get('lang') || 'en').toLowerCase().startsWith('ja') ? 'ja' : 'en';
+
+		// ---- i18n ----
+		const i18n = {
+			ja: {
+				zoomIn:            'ズームイン (+)',
+				zoomOut:           'ズームアウト (-)',
+				resetView:         'リセット (0)',
+				fitToScreen:       '画面にフィット (F)',
+				hint:              'マウスホイール: ズーム | ドラッグ: パン | ダブルクリック: フィット',
+				loading:           '読み込み中...',
+				loadError:         'エラー: 画像を読み込めませんでした',
+				generating:        (label) => `${label} を生成中...`,
+				genFailed:         '生成に失敗しました',
+				ctxRegenOriginal:  'オリジナルサイズで再生成',
+				ctxRegenMedium:    '2000×2000 で再生成',
+				ctxFit:            '画面にフィット',
+				labelOriginal:     'オリジナルサイズ',
+				labelMedium:       '高解像度画像 (2000×2000)',
+			},
+			en: {
+				zoomIn:            'Zoom In (+)',
+				zoomOut:           'Zoom Out (-)',
+				resetView:         'Reset (0)',
+				fitToScreen:       'Fit to Screen (F)',
+				hint:              'Wheel: Zoom | Drag: Pan | Double-click: Fit',
+				loading:           'Loading...',
+				loadError:         'Error: Could not load image',
+				generating:        (label) => `Generating ${label}...`,
+				genFailed:         'Generation failed',
+				ctxRegenOriginal:  'Regenerate at Original Size',
+				ctxRegenMedium:    'Regenerate at 2000×2000',
+				ctxFit:            'Fit to Screen',
+				labelOriginal:     'Original Size',
+				labelMedium:       'High-res (2000×2000)',
+			},
+		};
+		const t = i18n[lang];
+
+		// Apply i18n to static UI
+		document.querySelector('#zoomIn').textContent       = t.zoomIn;
+		document.querySelector('#zoomOut').textContent      = t.zoomOut;
+		document.querySelector('#resetView').textContent    = t.resetView;
+		document.querySelector('#fitToScreen').textContent  = t.fitToScreen;
+		document.querySelector('#toolbar span:last-child').textContent = t.hint;
+		document.querySelector('#loading').textContent      = t.loading;
+		document.getElementById('ctx-regen-original').textContent = t.ctxRegenOriginal;
+		document.getElementById('ctx-regen-medium').textContent   = t.ctxRegenMedium;
+		document.getElementById('ctx-fit').textContent            = t.ctxFit;
 
 		const viewer = document.querySelector('#viewer');
 		const wrapper = document.querySelector('#viewer-wrapper');
@@ -325,58 +425,137 @@
 		};
 
 		viewer.onerror = () => {
-			loading.textContent = 'エラー: 画像を読み込めませんでした';
+			loading.textContent = t.loadError;
 		};
 
-		// 2. Load the high-resolution cached version if available
+		// 2. Load the high-resolution cached version if available, or generate it
+		const fs = require('fs');
+		const purerefUtil = require(path.join(__dirname, '..', 'js', 'pureref-util.js'));
+
+		// キャッシュファイルパス
+		const cacheFilePath = filePath.replace(".pur", "_cache_hires.png");
+		const cacheOriginalPath = filePath.replace(".pur", "_cache_hires_original.png");
+
+		async function loadCacheImage(cacheImagePath) {
+			const cacheUrl = 'file:///' + cacheImagePath.replace(/\\/g, '/');
+			console.log('[PureRef Viewer] Cache URL:', cacheUrl);
+
+			const response = await fetch(cacheUrl);
+			if (!response.ok) throw new Error('Cache file not found');
+			const blob = await response.blob();
+			const objectUrl = URL.createObjectURL(blob);
+
+			// Store current transform
+			let transform = null;
+			if (panzoomInstance) {
+				transform = panzoomInstance.getTransform();
+			}
+
+			viewer.src = objectUrl;
+			console.log('[PureRef Viewer] Loaded high-resolution cache');
+
+			viewer.onload = () => {
+				initPanzoom();
+				if (panzoomInstance && transform) {
+					panzoomInstance.zoomAbs(0, 0, transform.scale);
+					panzoomInstance.moveTo(transform.x, transform.y);
+				} else {
+					fitImageToScreen();
+				}
+			};
+		}
+
+		async function generateAndLoad(outputPath, width, height, label) {
+			console.log(`[PureRef Viewer] Generating cache (${label})...`);
+			loading.textContent = t.generating(label);
+			loading.style.display = 'block';
+			try {
+				if (fs.existsSync(outputPath)) {
+					fs.unlinkSync(outputPath);
+				}
+				await purerefUtil.exportPureRefThumbnail(filePath, outputPath, width, height);
+				console.log('[PureRef Viewer] Cache generated successfully');
+				loading.style.display = 'none';
+				await loadCacheImage(outputPath);
+			} catch (genErr) {
+				console.log('[PureRef Viewer] Cache generation failed:', genErr.message);
+				loading.textContent = t.genFailed;
+				setTimeout(() => { loading.style.display = 'none'; }, 3000);
+			}
+		}
+
+		// 起動時: オリジナルキャッシュ → 中解像度キャッシュ → 新規生成（2000x2000）の順で試行
 		(async function() {
 			try {
-				// Get the cache file path
-				const cacheFilePath = filePath.replace(".pur", "_cache_hires.png");
-				console.log('[PureRef Viewer] Looking for cache at:', cacheFilePath);
-
-				// Try to load cache using file:// protocol
-				const cacheUrl = 'file:///' + cacheFilePath.replace(/\\/g, '/');
-				console.log('[PureRef Viewer] Cache URL:', cacheUrl);
-
-				// Use fetch to check if cache exists
-				try {
-					const response = await fetch(cacheUrl);
-					if (response.ok) {
-						const blob = await response.blob();
-						const objectUrl = URL.createObjectURL(blob);
-
-						// Store current transform
-						let transform = null;
-						if (panzoomInstance) {
-							transform = panzoomInstance.getTransform();
-						}
-
-						viewer.src = objectUrl;
-						console.log('[PureRef Viewer] Loaded high-resolution cache');
-
-						viewer.onload = () => {
-							initPanzoom();
-
-							// Restore transform if available
-							if (panzoomInstance && transform) {
-								panzoomInstance.zoomAbs(0, 0, transform.scale);
-								panzoomInstance.moveTo(transform.x, transform.y);
-							} else {
-								fitImageToScreen();
-							}
-						};
-					} else {
-						console.log('[PureRef Viewer] Cache file not found, using thumbnail');
+				if (fs.existsSync(cacheOriginalPath)) {
+					console.log('[PureRef Viewer] Original cache found');
+					try {
+						await loadCacheImage(cacheOriginalPath);
+						return;
+					} catch (e) {
+						console.log('[PureRef Viewer] Could not load original cache:', e.message);
 					}
-				} catch (fetchErr) {
-					console.log('[PureRef Viewer] Could not fetch cache:', fetchErr.message);
-					// Keep using thumbnail
 				}
+
+				console.log('[PureRef Viewer] Looking for medium cache at:', cacheFilePath);
+				if (fs.existsSync(cacheFilePath)) {
+					try {
+						await loadCacheImage(cacheFilePath);
+						return;
+					} catch (e) {
+						console.log('[PureRef Viewer] Could not load medium cache:', e.message);
+					}
+				}
+
+				await generateAndLoad(cacheFilePath, 2000, 2000, t.labelMedium);
 			} catch (err) {
 				console.log('[PureRef Viewer] Error:', err.message);
+				loading.style.display = 'none';
 			}
 		})();
+
+		// ---- Context menu ----
+		const contextMenu = document.getElementById('context-menu');
+
+		function showContextMenu(x, y) {
+			contextMenu.style.left = x + 'px';
+			contextMenu.style.top = y + 'px';
+			contextMenu.classList.add('visible');
+		}
+
+		function hideContextMenu() {
+			contextMenu.classList.remove('visible');
+		}
+
+		document.addEventListener('contextmenu', (e) => {
+			e.preventDefault();
+			// ウィンドウ端のはみ出し補正
+			const menuW = 220;
+			const menuH = contextMenu.offsetHeight || 120;
+			const x = (e.clientX + menuW > window.innerWidth) ? window.innerWidth - menuW - 4 : e.clientX;
+			const y = (e.clientY + menuH > window.innerHeight) ? window.innerHeight - menuH - 4 : e.clientY;
+			showContextMenu(x, y);
+		});
+
+		document.addEventListener('click', () => hideContextMenu());
+		document.addEventListener('keydown', (e) => {
+			if (e.key === 'Escape') hideContextMenu();
+		});
+
+		document.getElementById('ctx-regen-original').addEventListener('click', async () => {
+			hideContextMenu();
+			await generateAndLoad(cacheOriginalPath, -1, -1, t.labelOriginal);
+		});
+
+		document.getElementById('ctx-regen-medium').addEventListener('click', async () => {
+			hideContextMenu();
+			await generateAndLoad(cacheFilePath, 2000, 2000, t.labelMedium);
+		});
+
+		document.getElementById('ctx-fit').addEventListener('click', () => {
+			hideContextMenu();
+			fitImageToScreen();
+		});
 	</script>
 </body>
 </html>
