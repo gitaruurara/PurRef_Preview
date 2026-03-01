@@ -1,22 +1,43 @@
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 const { exec } = require('child_process');
 const { promisify } = require('util');
+const os = require('os');
 
 const execAsync = promisify(exec);
 
+// Setup logging to file with unique name
+const logDir = path.join(os.tmpdir(), 'pureref_logs');
+if (!fs.existsSync(logDir)) {
+	try {
+		fs.mkdirSync(logDir, { recursive: true });
+	} catch (e) {}
+}
+
+const uniqueId = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+const logFile = path.join(logDir, `pureref_${uniqueId}.log`);
+
+function log(message) {
+	const timestamp = new Date().toISOString();
+	const logMessage = `[${timestamp}] ${message}\n`;
+	try {
+		fs.appendFileSync(logFile, logMessage, { encoding: 'utf8' });
+	} catch (e) {}
+}
+
 /**
- * Finds PureRef.exe installation path from Windows Registry, environment variables, or common paths
- * @returns {Promise<string|null>} Path to PureRef.exe or null if not found
+ * Finds PureRef.exe installation path
  */
 async function findPureRefPath() {
 	try {
-		// Try environment variable first
+		log('[findPureRefPath] Starting search...');
+
 		if (process.env.PUREREF_PATH && fs.existsSync(process.env.PUREREF_PATH)) {
+			log('[findPureRefPath] Found via PUREREF_PATH: ' + process.env.PUREREF_PATH);
 			return process.env.PUREREF_PATH;
 		}
 
-		// Try common installation paths
 		const commonPaths = [
 			'C:\\Program Files\\PureRef\\PureRef.exe',
 			'C:\\Program Files (x86)\\PureRef\\PureRef.exe',
@@ -28,135 +49,137 @@ async function findPureRefPath() {
 		for (const exePath of commonPaths) {
 			try {
 				if (fs.existsSync(exePath)) {
+					log('[findPureRefPath] Found at: ' + exePath);
 					return exePath;
 				}
-			} catch (err) {
-				// Continue to next path
-			}
+			} catch (err) {}
 		}
 
-		// Try where command (Windows)
 		try {
 			const { stdout } = await execAsync('where PureRef.exe');
 			const pureRefPath = stdout.trim().split('\n')[0];
 			if (pureRefPath && fs.existsSync(pureRefPath)) {
+				log('[findPureRefPath] Found via where: ' + pureRefPath);
 				return pureRefPath;
 			}
-		} catch (err) {
-			// Continue
-		}
+		} catch (err) {}
 
+		log('[findPureRefPath] NOT FOUND');
 		return null;
 	} catch (err) {
-		console.error('Error finding PureRef path:', err);
+		log('[findPureRefPath] Error: ' + err.message);
 		return null;
 	}
 }
 
 /**
  * Exports a scene from a .pur file to PNG using PureRef CLI
- * @param {string} purFilePath - Path to the .pur file
- * @param {string} outputPath - Output PNG file path
- * @param {number} width - Export width (default: 1000)
- * @param {number} height - Export height (default: 1000)
- * @param {Object} options - Additional options (currently unused)
- * @returns {Promise<void>}
+ * Uses spawn directly without batch file to handle full-width characters properly
  */
 async function exportPureRefThumbnail(purFilePath, outputPath, width = 1000, height = 1000, options = {}) {
 	return new Promise(async (resolve, reject) => {
-		const tempBatchFile = path.join(path.dirname(outputPath), 'pureref_temp.bat');
-
 		try {
 			const pureRefPath = await findPureRefPath();
 
 			if (!pureRefPath) {
-				return reject(new Error('PureRef.exe not found. Please install PureRef or set PUREREF_PATH environment variable.'));
+				return reject(new Error('PureRef.exe not found'));
 			}
 
-			console.log('[PureRef] Found PureRef at:', pureRefPath);
-			console.log('[PureRef] Input file:', purFilePath);
-			console.log('[PureRef] Output path:', outputPath);
+			log('[PureRef] PureRef: ' + pureRefPath);
+			log('[PureRef] Input: ' + purFilePath);
+			log('[PureRef] Output: ' + outputPath);
+			log('[PureRef] Dimensions: ' + width + 'x' + height);
 
-			// Create output directory if it doesn't exist
 			const outputDir = path.dirname(outputPath);
 			if (!fs.existsSync(outputDir)) {
 				fs.mkdirSync(outputDir, { recursive: true });
 			}
 
-			// Verify input file exists
 			if (!fs.existsSync(purFilePath)) {
-				return reject(new Error(`PureRef input file not found: ${purFilePath}`));
+				return reject(new Error(`Input file not found: ${purFilePath}`));
 			}
 
-			// Ensure output path has .png extension
 			let finalOutputPath = outputPath;
 			if (!finalOutputPath.endsWith('.png')) {
 				finalOutputPath = outputPath + '.png';
-				console.log('[PureRef] Added .png extension:', finalOutputPath);
 			}
 
-			// For batch files, backslashes must be doubled (escaped)
-			// Example: D:\path\to\file becomes D:\\path\\to\\file in batch syntax
-			const batchPurPath = purFilePath.replace(/\\/g, '\\\\');
-			const batchOutputPath = finalOutputPath.replace(/\\/g, '\\\\');
+			log('[PureRef] Final output: ' + finalOutputPath);
+			log('[PureRef] Spawning PureRef process...');
 
-			// Create batch file - this will be executed by cmd.exe
-			// cmd.exe will interpret the doubled backslashes as single backslashes
-			const batchContent = `@echo off\n"${pureRefPath}" -c "load;${batchPurPath}" -c "exportScene;${batchOutputPath};${width};${height};false" -c "exit"\n`;
+			const args = [
+				'-c', `load;${purFilePath}`,
+				'-c', `exportScene;${finalOutputPath};${width};${height};false`,
+				'-c', 'exit'
+			];
 
-			console.log('[PureRef] Creating batch file:', tempBatchFile);
-			fs.writeFileSync(tempBatchFile, batchContent);
+			log('[PureRef] Args[0]: -c');
+			log('[PureRef] Args[1]: ' + args[1]);
+			log('[PureRef] Args[2]: -c');
+			log('[PureRef] Args[3]: ' + args[3]);
+			log('[PureRef] Args[4]: -c');
+			log('[PureRef] Args[5]: ' + args[5]);
 
-			console.log('[PureRef] Executing command...');
-
-			// Execute batch file
-			const { stdout, stderr } = await execAsync(`"${tempBatchFile}"`, {
-				timeout: 60000,
-				maxBuffer: 10 * 1024 * 1024,
-				shell: 'cmd.exe'
+			const child = spawn(pureRefPath, args, {
+				stdio: 'pipe',
+				windowsHide: true,
+				encoding: 'utf8'
 			});
 
-			console.log('[PureRef] Command output:', stdout || '(empty)');
-			if (stderr) {
-				console.log('[PureRef] Errors:', stderr);
+			let stdout = '';
+			let stderr = '';
+
+			if (child.stdout) {
+				child.stdout.on('data', (data) => {
+					stdout += data;
+					log('[PureRef] OUT: ' + data);
+				});
 			}
 
-			// Wait for file system to sync
-			await new Promise(resolve => setTimeout(resolve, 1500));
-
-			// Check if output file was created
-			if (!fs.existsSync(finalOutputPath)) {
-				return reject(new Error(`PureRef export failed. Output file not created at: ${finalOutputPath}`));
+			if (child.stderr) {
+				child.stderr.on('data', (data) => {
+					stderr += data;
+					log('[PureRef] ERR: ' + data);
+				});
 			}
 
-			const fileSize = fs.statSync(finalOutputPath).size;
-			if (fileSize === 0) {
-				return reject(new Error(`PureRef export created empty file at: ${finalOutputPath}`));
-			}
+			child.on('error', (err) => {
+				log('[PureRef] SPAWN ERROR: ' + err.message);
+				return reject(err);
+			});
 
-			console.log('[PureRef] Export successful! File size:', fileSize, 'bytes');
+			child.on('close', (code) => {
+				log('[PureRef] EXIT CODE: ' + code);
 
-			return resolve();
+				setTimeout(() => {
+					log('[PureRef] Checking output file...');
+					if (!fs.existsSync(finalOutputPath)) {
+						log('[PureRef] ERROR: File not found at ' + finalOutputPath);
+						return reject(new Error('Output file not created'));
+					}
+
+					const fileSize = fs.statSync(finalOutputPath).size;
+					log('[PureRef] File exists, size: ' + fileSize);
+
+					if (fileSize === 0) {
+						log('[PureRef] ERROR: File is empty');
+						return reject(new Error('Output file is empty'));
+					}
+
+					log('[PureRef] SUCCESS!');
+					return resolve();
+				}, 1500);
+			});
+
 		} catch (err) {
-			console.error('[PureRef] Export error:', err);
-			return reject(new Error(`PureRef export error: ${err.message}`));
-		} finally {
-			// Clean up batch file
-			if (fs.existsSync(tempBatchFile)) {
-				try {
-					fs.unlinkSync(tempBatchFile);
-					console.log('[PureRef] Cleaned up temporary batch file');
-				} catch (err) {
-					console.log('[PureRef] Warning: Could not delete batch file');
-				}
-			}
+			log('[PureRef] EXCEPTION: ' + err.message);
+			return reject(err);
 		}
 	});
 }
 
 module.exports = {
-	findPureRefPath: findPureRefPath,
-	exportPureRefThumbnail: exportPureRefThumbnail
+	exportPureRefThumbnail,
+	findPureRefPath
 };
-
 

@@ -2,47 +2,92 @@ const fs = require('fs');
 const pureref = require('./../js/pureref-util.js');
 const imageSize = require('./../js/image-size.js');
 const path = require('path');
+const os = require('os');
+
+// Setup logging with unique filename
+const logDir = path.join(os.tmpdir(), 'pureref_logs');
+if (!fs.existsSync(logDir)) {
+	try {
+		fs.mkdirSync(logDir, { recursive: true });
+	} catch (e) {}
+}
+const uniqueSuffix = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+const logFile = path.join(logDir, `thumbnail_${uniqueSuffix}.log`);
+
+function log(message) {
+	const timestamp = new Date().toISOString();
+	const logMessage = `[${timestamp}] ${message}\n`;
+	try {
+		fs.appendFileSync(logFile, logMessage, { encoding: 'utf8' });
+	} catch (e) {}
+}
 
 module.exports = async ({ src, dest, item }) => {
-    return new Promise(async (resolve, reject) => {
-        try {
-			// 1. Export scene from .pur file to PNG using PureRef CLI
+	return new Promise(async (resolve, reject) => {
+		try {
+			log('='.repeat(80));
+			log('THUMBNAIL GENERATION STARTED');
+			log('Source: ' + src);
+			log('Destination: ' + dest);
+			log('Log: ' + logFile);
+			log('='.repeat(80));
+
+			if (!fs.existsSync(src)) {
+				log('ERROR: Source file not found');
+				return reject(new Error(`Source file not found: ${src}`));
+			}
+			log('Source verified');
+
+			log('Exporting thumbnail...');
 			await pureref.exportPureRefThumbnail(src, dest, 1000, 1000);
+			log('Export completed');
+
+			if (!fs.existsSync(dest)) {
+				log('ERROR: Thumbnail not created');
+				return reject(new Error(`Thumbnail not created: ${dest}`));
+			}
+			log('Thumbnail file exists: ' + fs.statSync(dest).size + ' bytes');
+
+			log('Getting image size...');
 			let size = await imageSize(dest);
+			log('Size: ' + size.width + 'x' + size.height);
 
-			// 2. Check if the result is correct
 			if (!fs.existsSync(dest) || size.width === 0) {
-                return reject(new Error(`PureRef scene export failed or image is invalid.`));
-            }
+				log('ERROR: Invalid image');
+				return reject(new Error('Image is invalid'));
+			}
 
-			// 3. Update the item dimensions
-            item.height = size?.height || item.height;
-            item.width = size?.width || item.width;
+			item.height = size?.height || item.height;
+			item.width = size?.width || item.width;
+			log('Item updated');
 
-			// 4. Create a cached high-resolution version in the same directory
-			// This will be used by the viewer to avoid re-exporting every time
+			// Create cache
 			const cacheDir = path.dirname(src);
 			const fileName = path.basename(src, '.pur');
 			const cacheFile = path.join(cacheDir, `${fileName}_cache_hires.png`);
+			log('Cache path: ' + cacheFile);
 
-			// Only generate cache if it doesn't already exist
 			if (!fs.existsSync(cacheFile)) {
-				console.log('[PureRef] Generating cached high-resolution version...');
+				log('Creating high-res cache...');
 				try {
 					await pureref.exportPureRefThumbnail(src, cacheFile, 2000, 2000);
-					console.log('[PureRef] Cache file created:', cacheFile);
-				} catch (err) {
-					console.log('[PureRef] Warning: Could not create cache file:', err.message);
-					// Don't reject on cache failure - thumbnail is enough
+					log('Cache created: ' + (fs.existsSync(cacheFile) ? 'OK' : 'FAILED'));
+				} catch (e) {
+					log('Cache creation failed (non-fatal): ' + e.message);
 				}
 			}
 
-			// 5. Return the result
-            return resolve(item);
-        }
-        catch (err) {
-            return reject(err);
-        }
-    });
+			log('='.repeat(80));
+			log('SUCCESS');
+			log('='.repeat(80));
+			return resolve(item);
+		}
+		catch (err) {
+			log('='.repeat(80));
+			log('FAILED: ' + err.message);
+			log('='.repeat(80));
+			return reject(err);
+		}
+	});
 }
 

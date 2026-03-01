@@ -113,64 +113,12 @@
 		}
 
 		// 1. Load the thumbnail image first
-		viewer.src = filePath.replace(".pur", "_thumbnail.png");
-
-		// 2. Try to load cached high-resolution version
-		(async function() {
-			const path = require('path');
-			const fs = require('fs');
-
-			const cacheDir = path.dirname(filePath);
-			const fileName = path.basename(filePath, '.pur');
-			const cacheFile = path.join(cacheDir, `${fileName}_cache_hires.png`);
-
-			console.log('[PureRef Viewer] Looking for cache file:', cacheFile);
-
-			if (fs.existsSync(cacheFile)) {
-				// Cache file exists - use it directly
-				console.log('[PureRef Viewer] Using cached high-resolution version');
-				try {
-					const buffer = await fs.promises.readFile(cacheFile);
-					viewer.src = `data:image/png;base64,${buffer.toString('base64')}`;
-					viewer.onload = () => {
-						updateZoom();
-					};
-				} catch (err) {
-					console.log('[PureRef Viewer] Error reading cache:', err.message);
-				}
-			} else {
-				// No cache - generate on the fly
-				console.log('[PureRef Viewer] No cache found, generating high-resolution version...');
-				const pureref = require('./../js/pureref-util.js');
-				const os = require('os');
-
-				const tempDir = os.tmpdir();
-				const tempExportPath = path.join(tempDir, `${fileName}_preview_${Date.now()}.png`);
-
-				try {
-					await pureref.exportPureRefThumbnail(filePath, tempExportPath, 2000, 2000);
-
-					const buffer = await fs.promises.readFile(tempExportPath);
-					viewer.src = `data:image/png;base64,${buffer.toString('base64')}`;
-
-					viewer.onload = () => {
-						updateZoom();
-					};
-
-					console.log('[PureRef Viewer] Display successful!');
-
-					// Clean up temporary file
-					setTimeout(() => {
-						if (fs.existsSync(tempExportPath)) {
-							fs.unlinkSync(tempExportPath);
-						}
-					}, 2000);
-				} catch (err) {
-					console.error('[PureRef Viewer] Failed to generate high-resolution version:', err);
-					console.log('[PureRef Viewer] Using thumbnail as fallback');
-				}
-			}
-		})();
+		const thumbnailPath = filePath.replace(".pur", "_thumbnail.png");
+		viewer.src = thumbnailPath;
+		console.log('[PureRef Viewer] Loading thumbnail:', thumbnailPath);
+		viewer.onload = () => {
+			updateZoom();
+		};
 	</script>
 </body>
 </html>
