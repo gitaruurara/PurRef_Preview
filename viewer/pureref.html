@@ -119,6 +119,40 @@
 		viewer.onload = () => {
 			updateZoom();
 		};
+
+		// 2. Load the high-resolution cached version if available
+		(async function() {
+			try {
+				// Get the cache file path
+				const cacheFilePath = filePath.replace(".pur", "_cache_hires.png");
+				console.log('[PureRef Viewer] Looking for cache at:', cacheFilePath);
+
+				// Try to load cache using file:// protocol
+				const cacheUrl = 'file:///' + cacheFilePath.replace(/\\/g, '/');
+				console.log('[PureRef Viewer] Cache URL:', cacheUrl);
+
+				// Use fetch to check if cache exists
+				try {
+					const response = await fetch(cacheUrl);
+					if (response.ok) {
+						const blob = await response.blob();
+						const objectUrl = URL.createObjectURL(blob);
+						viewer.src = objectUrl;
+						console.log('[PureRef Viewer] Loaded high-resolution cache');
+						viewer.onload = () => {
+							updateZoom();
+						};
+					} else {
+						console.log('[PureRef Viewer] Cache file not found, using thumbnail');
+					}
+				} catch (fetchErr) {
+					console.log('[PureRef Viewer] Could not fetch cache:', fetchErr.message);
+					// Keep using thumbnail
+				}
+			} catch (err) {
+				console.log('[PureRef Viewer] Error:', err.message);
+			}
+		})();
 	</script>
 </body>
 </html>
