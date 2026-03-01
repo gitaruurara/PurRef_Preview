@@ -1,0 +1,33 @@
+{
+    "id": "5bb92c49-95e2-4722-a853-b471a1d2a23b",
+    "version": "1.0.0",
+    "platform": "all",
+    "arch": "all",
+    "name": "PurRef_Preview",
+    "logo": "/logo.png",
+    "keywords": [
+        "icns",
+        "pur"
+    ],
+    "devTools": false,
+    "preview": {
+        "icns": {
+            "thumbnail": {
+                "path": "thumbnail/icns.js",
+                "size": 400
+            },
+            "viewer": {
+                "path": "viewer/icns.html"
+            }
+        },
+        "pur": {
+            "thumbnail": {
+                "path": "thumbnail/pureref.js",
+                "size": 400
+            },
+            "viewer": {
+                "path": "viewer/pureref.html"
+            }
+        }
+    }
+}

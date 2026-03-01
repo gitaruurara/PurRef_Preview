@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>PureRef Viewer</title>
+	<style>
+		html, body {
+			margin: 0;
+			padding: 0;
+			overflow: hidden;
+		}
+		#viewer {
+			pointer-events: none;
+			object-fit: contain;
+			object-position: center;
+			width: 100%;
+			height: 100%;
+			max-width: 100vw;
+    		max-height: 100vh;
+		}
+	</style>
+</head>
+<body>
+	<img id="viewer" alt="PureRef scene preview" src=""/>
+	<script>
+		const urlParams = new URLSearchParams(window.location.search);
+		const filePath = urlParams.get('path');
+
+		const viewer = document.querySelector('#viewer');
+
+		// 1. Load the thumbnail image first
+		// 👍 Avoid loading for too long, and UI has no content
+		viewer.src = filePath.replace(".pur", "_thumbnail.png");
+
+		// 2. Load the file and replace with exported scene image
+		(async function() {
+			const pureref = require('./../js/pureref-util.js');
+			const os = require('os');
+			const path = require('path');
+
+			// Generate a temporary export path for high-resolution display
+			const tempDir = os.tmpdir();
+			const fileName = path.basename(filePath, '.pur');
+			const tempExportPath = path.join(tempDir, `${fileName}_preview_${Date.now()}.png`);
+
+			try {
+				console.log('[PureRef Viewer] Starting export...');
+				console.log('[PureRef Viewer] Input:', filePath);
+				console.log('[PureRef Viewer] Output:', tempExportPath);
+
+				// Export at higher resolution for better viewing
+				await pureref.exportPureRefThumbnail(filePath, tempExportPath, 2000, 2000);
+
+				// Convert file path to data URL for display
+				const fs = require('fs');
+				const buffer = await fs.promises.readFile(tempExportPath);
+				viewer.src = `data:image/png;base64,${buffer.toString('base64')}`;
+
+				console.log('[PureRef Viewer] Display successful!');
+
+				// Clean up temporary file after loading
+				setTimeout(() => {
+					if (fs.existsSync(tempExportPath)) {
+						fs.unlinkSync(tempExportPath);
+						console.log('[PureRef Viewer] Cleaned up temporary file');
+					}
+				}, 2000);
+			} catch (err) {
+				console.error('[PureRef Viewer] Failed to export PureRef scene:', err);
+				// Keep thumbnail if export fails
+				console.log('[PureRef Viewer] Keeping thumbnail as fallback');
+			}
+		})();
+	</script>
+</body>
+</html>
+
+
