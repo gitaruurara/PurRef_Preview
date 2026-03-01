@@ -115,60 +115,48 @@
 		// 1. Load the thumbnail image first
 		viewer.src = filePath.replace(".pur", "_thumbnail.png");
 
-		// 2. Try to load cached high-resolution version
+		// 2. Load the file and replace with exported scene image
 		(async function() {
+			const pureref = require('./../js/pureref-util.js');
+			const os = require('os');
 			const path = require('path');
-			const fs = require('fs');
 
-			const cacheDir = path.dirname(filePath);
+			// Generate a temporary export path for high-resolution display
+			const tempDir = os.tmpdir();
 			const fileName = path.basename(filePath, '.pur');
-			const cacheFile = path.join(cacheDir, `${fileName}_cache_hires.png`);
+			const tempExportPath = path.join(tempDir, `${fileName}_preview_${Date.now()}.png`);
 
-			console.log('[PureRef Viewer] Looking for cache file:', cacheFile);
+			try {
+				console.log('[PureRef Viewer] Starting export...');
+				console.log('[PureRef Viewer] Input:', filePath);
+				console.log('[PureRef Viewer] Output:', tempExportPath);
 
-			if (fs.existsSync(cacheFile)) {
-				// Cache file exists - use it directly
-				console.log('[PureRef Viewer] Using cached high-resolution version');
-				try {
-					const buffer = await fs.promises.readFile(cacheFile);
-					viewer.src = `data:image/png;base64,${buffer.toString('base64')}`;
-					viewer.onload = () => {
-						updateZoom();
-					};
-				} catch (err) {
-					console.log('[PureRef Viewer] Error reading cache:', err.message);
-				}
-			} else {
-				// No cache - generate on the fly
-				console.log('[PureRef Viewer] No cache found, generating high-resolution version...');
-				const pureref = require('./../js/pureref-util.js');
-				const os = require('os');
+				// Export at higher resolution for better viewing
+				await pureref.exportPureRefThumbnail(filePath, tempExportPath, 2000, 2000);
 
-				const tempDir = os.tmpdir();
-				const tempExportPath = path.join(tempDir, `${fileName}_preview_${Date.now()}.png`);
+				// Convert file path to data URL for display
+				const fs = require('fs');
+				const buffer = await fs.promises.readFile(tempExportPath);
+				viewer.src = `data:image/png;base64,${buffer.toString('base64')}`;
 
-				try {
-					await pureref.exportPureRefThumbnail(filePath, tempExportPath, 2000, 2000);
+				// Update zoom when image is loaded
+				viewer.onload = () => {
+					updateZoom();
+				};
 
-					const buffer = await fs.promises.readFile(tempExportPath);
-					viewer.src = `data:image/png;base64,${buffer.toString('base64')}`;
+				console.log('[PureRef Viewer] Display successful!');
 
-					viewer.onload = () => {
-						updateZoom();
-					};
-
-					console.log('[PureRef Viewer] Display successful!');
-
-					// Clean up temporary file
-					setTimeout(() => {
-						if (fs.existsSync(tempExportPath)) {
-							fs.unlinkSync(tempExportPath);
-						}
-					}, 2000);
-				} catch (err) {
-					console.error('[PureRef Viewer] Failed to generate high-resolution version:', err);
-					console.log('[PureRef Viewer] Using thumbnail as fallback');
-				}
+				// Clean up temporary file after loading
+				setTimeout(() => {
+					if (fs.existsSync(tempExportPath)) {
+						fs.unlinkSync(tempExportPath);
+						console.log('[PureRef Viewer] Cleaned up temporary file');
+					}
+				}, 2000);
+			} catch (err) {
+				console.error('[PureRef Viewer] Failed to export PureRef scene:', err);
+				// Keep thumbnail if export fails
+				console.log('[PureRef Viewer] Keeping thumbnail as fallback');
 			}
 		})();
 	</script>

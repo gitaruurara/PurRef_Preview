@@ -1,6 +1,7 @@
 const fs = require('fs');
 const pureref = require('./../js/pureref-util.js');
 const imageSize = require('./../js/image-size.js');
+const path = require('path');
 
 module.exports = async ({ src, dest, item }) => {
     return new Promise(async (resolve, reject) => {
@@ -18,7 +19,25 @@ module.exports = async ({ src, dest, item }) => {
             item.height = size?.height || item.height;
             item.width = size?.width || item.width;
 
-			// 4. Return the result
+			// 4. Create a cached high-resolution version in the same directory
+			// This will be used by the viewer to avoid re-exporting every time
+			const cacheDir = path.dirname(src);
+			const fileName = path.basename(src, '.pur');
+			const cacheFile = path.join(cacheDir, `${fileName}_cache_hires.png`);
+
+			// Only generate cache if it doesn't already exist
+			if (!fs.existsSync(cacheFile)) {
+				console.log('[PureRef] Generating cached high-resolution version...');
+				try {
+					await pureref.exportPureRefThumbnail(src, cacheFile, 2000, 2000);
+					console.log('[PureRef] Cache file created:', cacheFile);
+				} catch (err) {
+					console.log('[PureRef] Warning: Could not create cache file:', err.message);
+					// Don't reject on cache failure - thumbnail is enough
+				}
+			}
+
+			// 5. Return the result
             return resolve(item);
         }
         catch (err) {
