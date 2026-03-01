@@ -5,8 +5,16 @@
     "arch": "all",
     "name": "PurRef_Preview",
     "logo": "/logo.png",
+    "description": "Preview PureRef (.pur) files directly in Eagle with zoom/pan viewer and high-resolution cache generation.",
+    "author": {
+        "name": "gitaruurara",
+        "url": "https://github.com/gitaruurara"
+    },
+    "homepage": "https://github.com/gitaruurara/PurRef_Preview",
     "keywords": [
-        "pur"
+        "pur",
+        "pureref",
+        "preview"
     ],
     "devTools": false,
     "preview": {

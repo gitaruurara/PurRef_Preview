@@ -1,7 +1,7 @@
 {
   "name": "purref_preview",
   "version": "1.0.0",
-  "description": "",
+  "description": "Eagle plugin to preview PureRef (.pur) files with zoom/pan viewer and high-resolution cache generation.",
   "main": "index.js",
   "directories": {
     "test": "test"
@@ -9,8 +9,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["eagle", "pureref", "pur", "preview", "plugin"],
+  "author": "gitaruurara",
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
