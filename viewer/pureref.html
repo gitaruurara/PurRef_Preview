@@ -10,6 +10,7 @@
 			overflow: hidden;
 			background: #1e1e1e;
 			font-family: Arial, sans-serif;
+			user-select: none;
 		}
 
 		#container {
@@ -25,27 +26,53 @@
 			border-bottom: 1px solid #444;
 			color: #fff;
 			font-size: 12px;
+			display: flex;
+			align-items: center;
+			gap: 20px;
 		}
 
-		#toolbar span {
-			margin-right: 20px;
+		#toolbar button {
+			background: #444;
+			border: 1px solid #666;
+			color: #fff;
+			padding: 5px 10px;
+			cursor: pointer;
+			border-radius: 3px;
+		}
+
+		#toolbar button:hover {
+			background: #555;
+		}
+
+		#toolbar button:active {
+			background: #333;
 		}
 
 		#viewer-wrapper {
 			flex: 1;
-			overflow: auto;
-			display: flex;
-			align-items: center;
-			justify-content: center;
+			overflow: hidden;
+			position: relative;
+			background: #1e1e1e;
 		}
 
 		#viewer {
-			pointer-events: auto;
+			display: block;
 			cursor: grab;
+			user-select: none;
+			-webkit-user-drag: none;
 		}
 
 		#viewer:active {
 			cursor: grabbing;
+		}
+
+		#loading {
+			position: absolute;
+			top: 50%;
+			left: 50%;
+			transform: translate(-50%, -50%);
+			color: #888;
+			font-size: 14px;
 		}
 	</style>
 </head>
@@ -53,71 +80,252 @@
 	<div id="container">
 		<div id="toolbar">
 			<span>Zoom: <span id="zoomLevel">100%</span></span>
-			<span>Scroll: マウスホイール | Pan: ドラッグ</span>
+			<button id="zoomIn">ズームイン (+)</button>
+			<button id="zoomOut">ズームアウト (-)</button>
+			<button id="resetView">リセット (0)</button>
+			<button id="fitToScreen">画面にフィット (F)</button>
+			<span style="margin-left: auto;">マウスホイール: ズーム | ドラッグ: パン | ダブルクリック: フィット</span>
 		</div>
 		<div id="viewer-wrapper">
+			<div id="loading">読み込み中...</div>
 			<img id="viewer" alt="PureRef scene preview" src=""/>
 		</div>
 	</div>
 
 	<script>
+		// Load panzoom from relative path
+		const path = require('path');
+		const panzoomPath = path.join(__dirname, '..', 'node_modules', 'panzoom', 'index.js');
+		console.log('[PureRef Viewer] Loading panzoom from:', panzoomPath);
+
+		let panzoom;
+		try {
+			panzoom = require(panzoomPath);
+			console.log('[PureRef Viewer] Panzoom loaded successfully');
+		} catch (err) {
+			console.error('[PureRef Viewer] Failed to load panzoom:', err.message);
+			alert('エラー: panzoom ライブラリを読み込めませんでした。\n手動でパン・ズーム機能を有効にします。');
+		}
+
 		const urlParams = new URLSearchParams(window.location.search);
 		const filePath = urlParams.get('path');
 
 		const viewer = document.querySelector('#viewer');
 		const wrapper = document.querySelector('#viewer-wrapper');
 		const zoomLevelDisplay = document.querySelector('#zoomLevel');
+		const loading = document.querySelector('#loading');
 
-		let zoomLevel = 1;
-		let isPanning = false;
-		let panStartX = 0;
-		let panStartY = 0;
-		let panStartScrollLeft = 0;
-		let panStartScrollTop = 0;
+		// Initialize panzoom
+		let panzoomInstance = null;
+		let currentScale = 1;
 
-		// ズーム機能
-		wrapper.addEventListener('wheel', (e) => {
-			e.preventDefault();
+		function initPanzoom() {
+			if (!panzoom) {
+				console.log('[PureRef Viewer] Using fallback manual pan/zoom');
+				initManualPanZoom();
+				return;
+			}
 
-			const delta = e.deltaY > 0 ? 0.9 : 1.1;
-			zoomLevel *= delta;
-			zoomLevel = Math.max(0.1, Math.min(5, zoomLevel)); // 10% - 500%
+			if (panzoomInstance) {
+				panzoomInstance.dispose();
+			}
 
-			updateZoom();
-		});
+			panzoomInstance = panzoom(viewer, {
+				maxZoom: 10,
+				minZoom: 0.1,
+				smoothScroll: false,
+				bounds: false,
+				zoomDoubleClickSpeed: 1,
+				beforeWheel: function(e) {
+					// Allow zooming
+					return false;
+				},
+				onTouch: function(e) {
+					// Enable touch support
+					return false;
+				}
+			});
 
-		// パン機能
-		viewer.addEventListener('mousedown', (e) => {
-			isPanning = true;
-			panStartX = e.clientX;
-			panStartY = e.clientY;
-			panStartScrollLeft = wrapper.scrollLeft;
-			panStartScrollTop = wrapper.scrollTop;
-		});
+			// Update zoom level display
+			panzoomInstance.on('zoom', function(instance) {
+				currentScale = instance.getTransform().scale;
+				zoomLevelDisplay.textContent = Math.round(currentScale * 100) + '%';
+			});
 
-		document.addEventListener('mousemove', (e) => {
-			if (!isPanning) return;
+			// Update on pan
+			panzoomInstance.on('pan', function(instance) {
+				// Just update - no need to do anything special
+			});
 
-			wrapper.scrollLeft = panStartScrollLeft - (e.clientX - panStartX);
-			wrapper.scrollTop = panStartScrollTop - (e.clientY - panStartY);
-		});
-
-		document.addEventListener('mouseup', () => {
-			isPanning = false;
-		});
-
-		function updateZoom() {
-			viewer.style.width = (viewer.naturalWidth * zoomLevel) + 'px';
-			viewer.style.height = (viewer.naturalHeight * zoomLevel) + 'px';
-			zoomLevelDisplay.textContent = Math.round(zoomLevel * 100) + '%';
+			console.log('[PureRef Viewer] Panzoom initialized');
 		}
+
+		// Fallback manual pan/zoom implementation
+		function initManualPanZoom() {
+			let scale = 1;
+			let translateX = 0;
+			let translateY = 0;
+			let isDragging = false;
+			let startX, startY;
+
+			function updateTransform() {
+				viewer.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+				viewer.style.transformOrigin = '0 0';
+				zoomLevelDisplay.textContent = Math.round(scale * 100) + '%';
+			}
+
+			// Mouse drag
+			viewer.addEventListener('mousedown', (e) => {
+				isDragging = true;
+				startX = e.clientX - translateX;
+				startY = e.clientY - translateY;
+				e.preventDefault();
+			});
+
+			document.addEventListener('mousemove', (e) => {
+				if (!isDragging) return;
+				translateX = e.clientX - startX;
+				translateY = e.clientY - startY;
+				updateTransform();
+			});
+
+			document.addEventListener('mouseup', () => {
+				isDragging = false;
+			});
+
+			// Mouse wheel zoom
+			wrapper.addEventListener('wheel', (e) => {
+				e.preventDefault();
+				const delta = e.deltaY > 0 ? 0.9 : 1.1;
+				scale *= delta;
+				scale = Math.max(0.1, Math.min(10, scale));
+				updateTransform();
+			});
+
+			// Store manual zoom functions
+			window.manualZoomIn = () => {
+				scale *= 1.2;
+				scale = Math.min(10, scale);
+				updateTransform();
+			};
+
+			window.manualZoomOut = () => {
+				scale *= 0.8;
+				scale = Math.max(0.1, scale);
+				updateTransform();
+			};
+
+			window.manualReset = () => {
+				scale = 1;
+				translateX = 0;
+				translateY = 0;
+				updateTransform();
+			};
+
+			window.manualFit = () => {
+				if (!viewer.naturalWidth || !viewer.naturalHeight) return;
+				const wrapperRect = wrapper.getBoundingClientRect();
+				const scaleX = wrapperRect.width / viewer.naturalWidth;
+				const scaleY = wrapperRect.height / viewer.naturalHeight;
+				scale = Math.min(scaleX, scaleY) * 0.9;
+				translateX = (wrapperRect.width - viewer.naturalWidth * scale) / 2;
+				translateY = (wrapperRect.height - viewer.naturalHeight * scale) / 2;
+				updateTransform();
+			};
+
+			console.log('[PureRef Viewer] Manual pan/zoom initialized');
+		}
+
+		// Toolbar controls
+		document.querySelector('#zoomIn').addEventListener('click', () => {
+			if (panzoomInstance) {
+				panzoomInstance.smoothZoom(0, 0, 1.2);
+			} else if (window.manualZoomIn) {
+				window.manualZoomIn();
+			}
+		});
+
+		document.querySelector('#zoomOut').addEventListener('click', () => {
+			if (panzoomInstance) {
+				panzoomInstance.smoothZoom(0, 0, 0.8);
+			} else if (window.manualZoomOut) {
+				window.manualZoomOut();
+			}
+		});
+
+		document.querySelector('#resetView').addEventListener('click', () => {
+			if (panzoomInstance) {
+				panzoomInstance.moveTo(0, 0);
+				panzoomInstance.zoomAbs(0, 0, 1);
+			} else if (window.manualReset) {
+				window.manualReset();
+			}
+		});
+
+		document.querySelector('#fitToScreen').addEventListener('click', () => {
+			fitImageToScreen();
+		});
+
+		function fitImageToScreen() {
+			if (!viewer.naturalWidth || !viewer.naturalHeight) return;
+
+			if (panzoomInstance) {
+				const wrapperRect = wrapper.getBoundingClientRect();
+				const scaleX = wrapperRect.width / viewer.naturalWidth;
+				const scaleY = wrapperRect.height / viewer.naturalHeight;
+				const scale = Math.min(scaleX, scaleY) * 0.9;
+
+				const x = (wrapperRect.width - viewer.naturalWidth * scale) / 2;
+				const y = (wrapperRect.height - viewer.naturalHeight * scale) / 2;
+
+				panzoomInstance.moveTo(x, y);
+				panzoomInstance.zoomAbs(0, 0, scale);
+			} else if (window.manualFit) {
+				window.manualFit();
+			}
+		}
+
+		// Keyboard shortcuts
+		document.addEventListener('keydown', (e) => {
+			if (e.key === '+' || e.key === '=') {
+				document.querySelector('#zoomIn').click();
+			} else if (e.key === '-') {
+				document.querySelector('#zoomOut').click();
+			} else if (e.key === '0') {
+				document.querySelector('#resetView').click();
+			} else if (e.key === 'f' || e.key === 'F') {
+				fitImageToScreen();
+			}
+		});
+
+		// Double click to fit
+		viewer.addEventListener('dblclick', () => {
+			fitImageToScreen();
+		});
 
 		// 1. Load the thumbnail image first
 		const thumbnailPath = filePath.replace(".pur", "_thumbnail.png");
 		viewer.src = thumbnailPath;
 		console.log('[PureRef Viewer] Loading thumbnail:', thumbnailPath);
+
 		viewer.onload = () => {
-			updateZoom();
+			loading.style.display = 'none';
+
+			// Make sure image is visible
+			viewer.style.display = 'block';
+
+			console.log('[PureRef Viewer] Image loaded, dimensions:', viewer.naturalWidth, 'x', viewer.naturalHeight);
+
+			initPanzoom();
+
+			// Fit to screen after a short delay to ensure panzoom is ready
+			setTimeout(() => {
+				fitImageToScreen();
+			}, 100);
+		};
+
+		viewer.onerror = () => {
+			loading.textContent = 'エラー: 画像を読み込めませんでした';
 		};
 
 		// 2. Load the high-resolution cached version if available
@@ -137,10 +345,26 @@
 					if (response.ok) {
 						const blob = await response.blob();
 						const objectUrl = URL.createObjectURL(blob);
+
+						// Store current transform
+						let transform = null;
+						if (panzoomInstance) {
+							transform = panzoomInstance.getTransform();
+						}
+
 						viewer.src = objectUrl;
 						console.log('[PureRef Viewer] Loaded high-resolution cache');
+
 						viewer.onload = () => {
-							updateZoom();
+							initPanzoom();
+
+							// Restore transform if available
+							if (panzoomInstance && transform) {
+								panzoomInstance.zoomAbs(0, 0, transform.scale);
+								panzoomInstance.moveTo(transform.x, transform.y);
+							} else {
+								fitImageToScreen();
+							}
 						};
 					} else {
 						console.log('[PureRef Viewer] Cache file not found, using thumbnail');
