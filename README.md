@@ -118,7 +118,8 @@ PurRef_Preview/
 
 ## ライセンス
 
-ISC
+MIT
+
 
 
 
